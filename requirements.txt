@@ -1,0 +1,4 @@
+requests
+Pillow
+moviepy
+python-dotenv
