@@ -1,0 +1,38 @@
+
+name: Travel Video AI Pipeline
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * *"
+    - cron: "0 18 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install requests
+
+      - name: Run AI pipeline
+        run: |
+          python pipeline.py
+
+      - name: Save generated files
+        uses: actions/upload-artifact@v4
+        with:
+          name: travel-video-plans
+          path: output/
