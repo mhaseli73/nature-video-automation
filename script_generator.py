@@ -3,87 +3,106 @@ import json
 from pathlib import Path
 
 
-def generate_short(destination):
+def load_research():
+    path = Path("output/destination_research.json")
+
+    if path.exists():
+        with open(path, encoding="utf-8") as file:
+            return json.load(file)
+
+    return {}
+
+
+def generate_short(destination, research):
     name = destination["destination"]
     country = destination["country"]
-    theme = destination["theme"]
+    description = research.get("description", "")
+
+    if not description:
+        description = (
+            f"{name} is a destination in {country} "
+            "worth exploring."
+        )
 
     return f"""
 TITLE: Discover {name}
 
 HOOK:
-What if your next unforgettable adventure
-was waiting for you in {name}?
+Looking for your next unforgettable adventure?
 
 INTRODUCTION:
-Welcome to {name}, in {country}.
+Welcome to {name}, in {country}!
+
+DISCOVER:
+{description}
 
 EXPERIENCE:
-Explore its {theme}, enjoy the scenery,
-and discover what makes this destination special.
+Explore the scenery, discover local attractions,
+and experience the unique character of this destination.
 
 TRAVEL TIP:
-Research the best season to visit and
-plan enough time to explore.
+Research the best season to visit and plan your trip.
 
 ENDING:
-Would you add {name} to your travel bucket list?
-Subscribe for more amazing destinations!
+Would you visit {name}?
+Follow us for more amazing places around the world!
 """
 
 
-def generate_long(destination):
+def generate_long(destination, research):
     name = destination["destination"]
     country = destination["country"]
-    theme = destination["theme"]
+    description = research.get("description", "")
+
+    if not description:
+        description = f"{name} is located in {country}."
 
     return f"""
-TITLE: Exploring {name} - A Travel Guide
+TITLE: Exploring {name} | Complete Travel Guide
 
 INTRODUCTION:
-Imagine discovering a remarkable destination.
+Welcome to another travel adventure!
 Today, we are exploring {name}, in {country}.
 
-SECTION 1 - DISCOVER THE DESTINATION:
-Explore the landscape, atmosphere and
-character of this destination.
+CHAPTER 1 - INTRODUCTION:
+{description}
 
-SECTION 2 - WHAT TO EXPERIENCE:
-Discover its {theme} and the experiences
-travelers can enjoy.
+CHAPTER 2 - WHAT TO EXPLORE:
+Discover the most interesting attractions,
+landscapes and experiences in this destination.
 
-SECTION 3 - TRAVEL PLANNING:
+CHAPTER 3 - LOCAL EXPERIENCES:
+Explore local culture, food, traditions
+and the atmosphere of the region.
+
+CHAPTER 4 - TRAVEL PLANNING:
 Research transportation, accommodation,
-local conditions and the best time to visit.
+travel costs and the best visiting season.
 
-SECTION 4 - WHY VISIT:
-Discover what makes {name} worth considering
-for your next adventure.
+CHAPTER 5 - WHY VISIT:
+Discover what makes this destination
+interesting for international travelers.
 
 CONCLUSION:
-Would you visit {name}?
+Would you add {name} to your travel bucket list?
 Subscribe for more travel discoveries!
 """
 
 
 def main():
-    plan_file = Path("output/video_plan.json")
-
-    if not plan_file.exists():
-        print("Video plan not found!")
-        return
-
-    with open(plan_file, encoding="utf-8") as file:
+    with open("output/video_plan.json", encoding="utf-8") as file:
         plans = json.load(file)
+
+    research = load_research()
 
     output = Path("output/scripts")
     output.mkdir(parents=True, exist_ok=True)
 
     for plan in plans:
         if plan["video_type"] == "short":
-            script = generate_short(plan)
+            script = generate_short(plan, research)
         else:
-            script = generate_long(plan)
+            script = generate_long(plan, research)
 
         filename = f'{plan["video_type"]}_script.txt'
 
@@ -92,7 +111,9 @@ def main():
             encoding="utf-8"
         )
 
-        print(f"Created: {filename}")
+        print("Created:", filename)
+
+    print("Research-based script generation completed!")
 
 
 if __name__ == "__main__":
