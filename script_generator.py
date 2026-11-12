@@ -1,11 +1,18 @@
 
 import os
 import json
+import time
 from pathlib import Path
-from google import genai
-from google.genai import types
 
-MODEL = "gemini-3.8-flash"
+from google import genai
+from google.genai import types, errors
+
+
+PRIMARY_MODEL = "gemini-3.8-flash"
+FALLBACK_MODEL = "gemini-3.5-flash-lite"
+
+RETRY_DELAYS = [5, 15, 30]
+TEMPORARY_ERRORS = [429, 500, 502, 503, 504]
 
 
 def get_client():
@@ -17,7 +24,54 @@ def get_client():
     return genai.Client(api_key=api_key)
 
 
+def generate_with_retry(client, model, prompt):
+
+    for attempt in range(len(RETRY_DELAYS) + 1):
+
+        try:
+            print(
+                f"Trying {model} "
+                f"(attempt {attempt + 1})..."
+            )
+
+            response = client.models.generate_content(
+                model=model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=0.8,
+                    max_output_tokens=4000
+                )
+            )
+
+            if not response.text:
+                raise ValueError("Empty Gemini response")
+
+            return json.loads(response.text)
+
+        except errors.APIError as error:
+
+            status = getattr(error, "code", None)
+
+            print(f"Gemini API error: {status} - {error}")
+
+            if status not in TEMPORARY_ERRORS:
+                raise
+
+            if attempt < len(RETRY_DELAYS):
+                delay = RETRY_DELAYS[attempt]
+
+                print(f"Waiting {delay} seconds...")
+                time.sleep(delay)
+
+            else:
+                print(f"{model} failed after all retries.")
+
+    return None
+
+
 def generate_script(plan, research, client):
+
     video_type = plan["video_type"]
 
     if video_type == "short":
@@ -108,35 +162,65 @@ Return ONLY valid JSON:
 }}
 """
 
-    response = client.models.generate_content(
-        model=MODEL,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            temperature=0.8,
-            max_output_tokens=4000
-        )
+    print(f"Generating {video_type} script...")
+
+    result = generate_with_retry(
+        client,
+        PRIMARY_MODEL,
+        prompt
     )
 
-    result = json.loads(response.text)
+    if result is None:
+        print("Switching to fallback model...")
 
-    for field in [
+        result = generate_with_retry(
+            client,
+            FALLBACK_MODEL,
+            prompt
+        )
+
+    if result is None:
+        raise RuntimeError(
+            f"Both Gemini models failed for {video_type} script."
+        )
+
+    required = [
         "title",
         "hook",
         "narration",
         "visual_suggestions",
         "description",
         "tags"
-    ]:
+    ]
+
+    for field in required:
         if field not in result:
-            raise ValueError(f"Missing script field: {field}")
+            raise ValueError(
+                f"Missing script field: {field}"
+            )
+
+    if not all(
+        isinstance(result[field], str) and result[field].strip()
+        for field in ["title", "hook", "narration", "description"]
+    ):
+        raise ValueError("Invalid script text fields")
+
+    if not isinstance(result["visual_suggestions"], list):
+        raise ValueError("Invalid visual suggestions")
+
+    if not isinstance(result["tags"], list):
+        raise ValueError("Invalid tags")
+
+    print(f"{video_type.capitalize()} script generated successfully!")
 
     return result
 
 
 def main():
+
     output = Path("output")
     script_folder = output / "scripts"
+
     script_folder.mkdir(parents=True, exist_ok=True)
 
     with open(
@@ -154,14 +238,23 @@ def main():
     client = get_client()
 
     for plan in plans:
-        print("Generating:", plan["video_type"])
 
-        result = generate_script(plan, research, client)
+        video_type = plan["video_type"]
 
-        filename = f'{plan["video_type"]}_script.json'
+        print(f"\nGenerating: {video_type}")
+
+        result = generate_script(
+            plan,
+            research,
+            client
+        )
+
+        filename = f"{video_type}_script.json"
+
+        json_path = script_folder / filename
 
         with open(
-            script_folder / filename,
+            json_path,
             "w",
             encoding="utf-8"
         ) as file:
@@ -173,7 +266,7 @@ def main():
             )
 
         text_file = script_folder / (
-            f'{plan["video_type"]}_script.txt'
+            f"{video_type}_script.txt"
         )
 
         text_file.write_text(
@@ -183,9 +276,9 @@ def main():
             encoding="utf-8"
         )
 
-        print("Created:", filename)
+        print(f"Created: {filename}")
 
-    print("Gemini script generation completed!")
+    print("\nGemini script generation completed!")
 
 
 if __name__ == "__main__":
