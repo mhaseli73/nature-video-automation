@@ -7,11 +7,24 @@ from urllib.parse import quote
 
 def research_destination(destination):
     name = destination["destination"]
+    country = destination["country"]
 
     url = (
         "https://en.wikipedia.org/api/rest_v1/page/summary/"
         + quote(name, safe="")
     )
+
+    result = {
+        "destination": name,
+        "country": country,
+        "topic_angle": destination.get("topic_angle", ""),
+        "audience_reason": destination.get("audience_reason", ""),
+        "visual_ideas": destination.get("visual_ideas", []),
+        "theme": destination.get("theme", ""),
+        "description": "",
+        "source": "",
+        "status": "failed"
+    }
 
     try:
         response = requests.get(
@@ -23,40 +36,46 @@ def research_destination(destination):
         response.raise_for_status()
         data = response.json()
 
-        return {
-            "destination": name,
-            "country": destination["country"],
-            "description": data.get("extract", ""),
-            "source": data.get("content_urls", {})
-                .get("desktop", {}).get("page", ""),
-            "status": "success"
-        }
+        result["description"] = data.get("extract", "")
+        result["source"] = (
+            data.get("content_urls", {})
+            .get("desktop", {})
+            .get("page", "")
+        )
+
+        if result["description"]:
+            result["status"] = "success"
 
     except requests.RequestException as error:
-        return {
-            "destination": name,
-            "country": destination["country"],
-            "description": "",
-            "status": "failed",
-            "error": str(error)
-        }
+        result["error"] = str(error)
+
+    return result
 
 
 def main():
-    with open("output/video_plan.json", encoding="utf-8") as file:
+    output = Path("output")
+    output.mkdir(exist_ok=True)
+
+    with open(
+        output / "video_plan.json",
+        encoding="utf-8"
+    ) as file:
         plans = json.load(file)
 
     destination = plans[0]
     result = research_destination(destination)
 
-    Path("output").mkdir(exist_ok=True)
-
     with open(
-        "output/destination_research.json",
+        output / "destination_research.json",
         "w",
         encoding="utf-8"
     ) as file:
-        json.dump(result, file, indent=4, ensure_ascii=False)
+        json.dump(
+            result,
+            file,
+            indent=4,
+            ensure_ascii=False
+        )
 
     print("Research completed:", result["status"])
 
