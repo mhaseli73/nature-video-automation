@@ -1,4 +1,6 @@
+
 requests
 Pillow
 moviepy
 python-dotenv
+google-genai
