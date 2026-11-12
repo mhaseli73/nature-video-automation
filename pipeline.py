@@ -1,22 +1,67 @@
 
+import time
+import traceback
+
 import main
 import researcher
 import script_generator
 
 
+def run_step(name, function):
+
+    print(f"\n{'=' * 50}", flush=True)
+    print(f"STARTING: {name}", flush=True)
+
+    start_time = time.time()
+
+    try:
+        function()
+
+        elapsed = round(time.time() - start_time, 2)
+
+        print(
+            f"COMPLETED: {name} ({elapsed} seconds)",
+            flush=True
+        )
+
+    except Exception as error:
+
+        print(
+            f"FAILED: {name}: {error}",
+            flush=True
+        )
+
+        traceback.print_exc()
+
+        raise
+
+
 def run_pipeline():
-    print("Starting Travel Video AI Pipeline...")
 
-    print("\n1. Selecting destination...")
-    main.main()
+    print(
+        "Starting Travel Video AI Pipeline...",
+        flush=True
+    )
 
-    print("\n2. Researching destination...")
-    researcher.main()
+    run_step(
+        "Destination Selection",
+        main.main
+    )
 
-    print("\n3. Generating video scripts...")
-    script_generator.main()
+    run_step(
+        "Destination Research",
+        researcher.main
+    )
 
-    print("\nPipeline completed successfully!")
+    run_step(
+        "Video Script Generation",
+        script_generator.main
+    )
+
+    print(
+        "\nPipeline completed successfully!",
+        flush=True
+    )
 
 
 if __name__ == "__main__":
