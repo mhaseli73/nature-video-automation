@@ -11,11 +11,27 @@ from google.genai import types, errors
 PRIMARY_MODEL = "gemini-3.8-flash"
 FALLBACK_MODEL = "gemini-3.5-flash-lite"
 
-RETRY_DELAYS = [5, 15, 30]
-TEMPORARY_ERRORS = [429, 500, 502, 503, 504]
+RETRY_DELAYS = [5, 15, 30, 60]
+
+TEMPORARY_ERRORS = [408, 429, 500, 502, 503, 504]
+
+NETWORK_ERRORS = {
+    "remoteprotocolerror",
+    "connecterror",
+    "readerror",
+    "writeerror",
+    "connecttimeout",
+    "readtimeout",
+    "writetimeout",
+    "pooltimeout",
+    "timeoutexception",
+    "networkerror",
+    "protocolerror",
+}
 
 
 def get_client():
+
     api_key = os.getenv("GEMINI_API_KEY")
 
     if not api_key:
@@ -24,14 +40,52 @@ def get_client():
     return genai.Client(api_key=api_key)
 
 
+def is_retryable_error(error):
+
+    current = error
+
+    while current is not None:
+
+        error_name = type(current).__name__.lower()
+        error_message = str(current).lower()
+
+        if isinstance(current, errors.APIError):
+
+            status = getattr(current, "code", None)
+
+            if status in TEMPORARY_ERRORS:
+                return True
+
+        if error_name in NETWORK_ERRORS:
+            return True
+
+        if isinstance(current, json.JSONDecodeError):
+            return True
+
+        if "empty gemini response" in error_message:
+            return True
+
+        if "server disconnected" in error_message:
+            return True
+
+        current = (
+            current.__cause__
+            or current.__context__
+        )
+
+    return False
+
+
 def generate_with_retry(client, model, prompt):
 
     for attempt in range(len(RETRY_DELAYS) + 1):
 
         try:
+
             print(
                 f"Trying {model} "
-                f"(attempt {attempt + 1})..."
+                f"(attempt {attempt + 1}/"
+                f"{len(RETRY_DELAYS) + 1})..."
             )
 
             response = client.models.generate_content(
@@ -45,27 +99,43 @@ def generate_with_retry(client, model, prompt):
             )
 
             if not response.text:
-                raise ValueError("Empty Gemini response")
+                raise RuntimeError("Empty Gemini response")
 
-            return json.loads(response.text)
+            result = json.loads(response.text)
 
-        except errors.APIError as error:
+            if not isinstance(result, dict):
+                raise ValueError(
+                    "Gemini response must be a JSON object"
+                )
 
-            status = getattr(error, "code", None)
+            return result
 
-            print(f"Gemini API error: {status} - {error}")
+        except Exception as error:
 
-            if status not in TEMPORARY_ERRORS:
+            print(
+                f"Error with {model}: "
+                f"{type(error).__name__}: {error}"
+            )
+
+            if not is_retryable_error(error):
                 raise
 
             if attempt < len(RETRY_DELAYS):
+
                 delay = RETRY_DELAYS[attempt]
 
-                print(f"Waiting {delay} seconds...")
+                print(
+                    f"Temporary error detected. "
+                    f"Retrying in {delay} seconds..."
+                )
+
                 time.sleep(delay)
 
             else:
-                print(f"{model} failed after all retries.")
+
+                print(
+                    f"{model} failed after all retries."
+                )
 
     return None
 
@@ -75,9 +145,12 @@ def generate_script(plan, research, client):
     video_type = plan["video_type"]
 
     if video_type == "short":
+
         target_words = "120 to 140 words"
         duration = "60 seconds"
+
     else:
+
         target_words = "480 to 520 words"
         duration = "4 minutes"
 
@@ -171,7 +244,11 @@ Return ONLY valid JSON:
     )
 
     if result is None:
-        print("Switching to fallback model...")
+
+        print(
+            "Primary model exhausted. "
+            "Switching to fallback model..."
+        )
 
         result = generate_with_retry(
             client,
@@ -180,6 +257,7 @@ Return ONLY valid JSON:
         )
 
     if result is None:
+
         raise RuntimeError(
             f"Both Gemini models failed for {video_type} script."
         )
@@ -194,24 +272,40 @@ Return ONLY valid JSON:
     ]
 
     for field in required:
+
         if field not in result:
+
             raise ValueError(
                 f"Missing script field: {field}"
             )
 
+    text_fields = [
+        "title",
+        "hook",
+        "narration",
+        "description"
+    ]
+
     if not all(
-        isinstance(result[field], str) and result[field].strip()
-        for field in ["title", "hook", "narration", "description"]
+        isinstance(result[field], str)
+        and result[field].strip()
+        for field in text_fields
     ):
+
         raise ValueError("Invalid script text fields")
 
     if not isinstance(result["visual_suggestions"], list):
+
         raise ValueError("Invalid visual suggestions")
 
     if not isinstance(result["tags"], list):
+
         raise ValueError("Invalid tags")
 
-    print(f"{video_type.capitalize()} script generated successfully!")
+    print(
+        f"{video_type.capitalize()} "
+        f"script generated successfully!"
+    )
 
     return result
 
@@ -219,20 +313,26 @@ Return ONLY valid JSON:
 def main():
 
     output = Path("output")
+
     script_folder = output / "scripts"
 
-    script_folder.mkdir(parents=True, exist_ok=True)
+    script_folder.mkdir(
+        parents=True,
+        exist_ok=True
+    )
 
     with open(
         output / "video_plan.json",
         encoding="utf-8"
     ) as file:
+
         plans = json.load(file)
 
     with open(
         output / "destination_research.json",
         encoding="utf-8"
     ) as file:
+
         research = json.load(file)
 
     client = get_client()
@@ -258,6 +358,7 @@ def main():
             "w",
             encoding="utf-8"
         ) as file:
+
             json.dump(
                 result,
                 file,
@@ -278,7 +379,9 @@ def main():
 
         print(f"Created: {filename}")
 
-    print("\nGemini script generation completed!")
+    print(
+        "\nGemini script generation completed!"
+    )
 
 
 if __name__ == "__main__":
