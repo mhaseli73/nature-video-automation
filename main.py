@@ -1,68 +1,91 @@
 
 import json
-import random
 from pathlib import Path
+from datetime import datetime, timezone
 
-# Travel video production brain
+from gemini_brain import choose_destination
 
-DESTINATIONS = [
-    {
-        "name": "Swiss Alps",
-        "country": "Switzerland",
-        "theme": "mountains and nature"
-    },
-    {
-        "name": "Santorini",
-        "country": "Greece",
-        "theme": "islands and architecture"
-    },
-    {
-        "name": "Bali",
-        "country": "Indonesia",
-        "theme": "tropical beaches"
-    },
-    {
-        "name": "Dolomites",
-        "country": "Italy",
-        "theme": "mountains and hiking"
-    },
-    {
-        "name": "Banff National Park",
-        "country": "Canada",
-        "theme": "lakes and wildlife"
-    }
-]
-
-def choose_destination():
-    return random.choice(DESTINATIONS)
-
-def create_video_plan(destination, video_type):
-    return {
-        "destination": destination["name"],
-        "country": destination["country"],
-        "theme": destination["theme"],
-        "video_type": video_type,
-        "language": "English",
-        "audience": "International travelers",
-        "status": "planned"
-    }
 
 def main():
+    output = Path("output")
+    output.mkdir(exist_ok=True)
+
+    print("Gemini AI is selecting today's destination...")
+
     destination = choose_destination()
 
+    print("Selected:", destination["name"], destination["country"])
+
     plans = [
-        create_video_plan(destination, "short"),
-        create_video_plan(destination, "long")
+        {
+            "destination": destination["name"],
+            "country": destination["country"],
+            "theme": destination["theme"],
+            "topic_angle": destination["topic_angle"],
+            "audience_reason": destination["audience_reason"],
+            "visual_ideas": destination["visual_ideas"],
+            "video_type": "short",
+            "duration": 60,
+            "language": "English",
+            "audience": "International travelers",
+            "status": "planned"
+        },
+        {
+            "destination": destination["name"],
+            "country": destination["country"],
+            "theme": destination["theme"],
+            "topic_angle": destination["topic_angle"],
+            "audience_reason": destination["audience_reason"],
+            "visual_ideas": destination["visual_ideas"],
+            "video_type": "long",
+            "duration": 240,
+            "language": "English",
+            "audience": "International travelers",
+            "status": "planned"
+        }
     ]
 
-    Path("output").mkdir(exist_ok=True)
+    with open(
+        output / "video_plan.json",
+        "w",
+        encoding="utf-8"
+    ) as file:
+        json.dump(
+            plans,
+            file,
+            indent=4,
+            ensure_ascii=False
+        )
 
-    with open("output/video_plan.json", "w",
-              encoding="utf-8") as file:
-        json.dump(plans, file, indent=4)
+    history_file = output / "decision_history.json"
 
-    print("Travel video plans created!")
-    print(json.dumps(plans, indent=4))
+    history = []
+
+    if history_file.exists():
+        try:
+            history = json.loads(
+                history_file.read_text(encoding="utf-8")
+            )
+        except (json.JSONDecodeError, OSError):
+            history = []
+
+    history.append({
+        "destination": destination["name"],
+        "country": destination["country"],
+        "topic_angle": destination["topic_angle"],
+        "date": datetime.now(timezone.utc).isoformat()
+    })
+
+    history = history[-100:]
+
+    history_file.write_text(
+        json.dumps(history, indent=4, ensure_ascii=False),
+        encoding="utf-8"
+    )
+
+    print("AI video plans created successfully!")
+    print(json.dumps(plans, indent=4, ensure_ascii=False))
+
 
 if __name__ == "__main__":
     main()
