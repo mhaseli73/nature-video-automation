@@ -5,10 +5,13 @@ on:
   workflow_dispatch:
   schedule:
     - cron: "0 6 * * *"
-    - cron: "0 18 * * *"
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: travel-video-pipeline
+  cancel-in-progress: false
 
 jobs:
   generate:
@@ -34,9 +37,21 @@ jobs:
         run: |
           python pipeline.py
 
+      - name: Save AI decision history
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f output/decision_history.json
+          if git diff --cached --quiet; then
+            echo "No history changes"
+          else
+            git commit -m "Update AI decision history"
+            git push
+          fi
+
       - name: Save generated files
         uses: actions/upload-artifact@v4
         with:
-          name: travel-video-plans
+          name: travel-video-output
           path: output/
           if-no-files-found: warn
