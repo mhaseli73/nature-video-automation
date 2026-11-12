@@ -25,9 +25,12 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install requests
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
       - name: Run AI pipeline
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           python pipeline.py
 
@@ -36,3 +39,4 @@ jobs:
         with:
           name: travel-video-plans
           path: output/
+          if-no-files-found: warn
