@@ -5,6 +5,7 @@ import traceback
 import main
 import researcher
 import script_generator
+import scene_planner
 
 
 def run_step(name, function):
@@ -56,6 +57,11 @@ def run_pipeline():
     run_step(
         "Video Script Generation",
         script_generator.main
+    )
+
+    run_step(
+        "Scene Planning",
+        scene_planner.main
     )
 
     print(
