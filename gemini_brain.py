@@ -5,18 +5,19 @@ import time
 from pathlib import Path
 
 from google import genai
-from google.genai import types
-from google.genai import errors
+from google.genai import types, errors
 
 
 PRIMARY_MODEL = "gemini-3.8-flash"
 FALLBACK_MODEL = "gemini-3.5-flash-lite"
 
-RETRY_DELAYS = [5, 15, 30]
-TEMPORARY_ERRORS = [429, 500, 502, 503, 504]
+RETRY_DELAYS = [10, 30, 60]
+
+TEMPORARY_ERRORS = [408, 429, 500, 502, 503, 504]
 
 
 def get_client():
+
     api_key = os.getenv("GEMINI_API_KEY")
 
     if not api_key:
@@ -25,14 +26,33 @@ def get_client():
     return genai.Client(api_key=api_key)
 
 
+def is_daily_quota_error(error):
+
+    message = str(error).lower()
+
+    indicators = [
+        "per day",
+        "per_day",
+        "daily quota",
+        "requests per day",
+        "limit exceeded",
+        "free tier"
+    ]
+
+    return any(item in message for item in indicators)
+
+
 def generate_with_retry(client, model, prompt):
 
     for attempt in range(len(RETRY_DELAYS) + 1):
 
         try:
+
             print(
                 f"Trying {model} "
-                f"(attempt {attempt + 1})..."
+                f"(attempt {attempt + 1}/"
+                f"{len(RETRY_DELAYS) + 1})...",
+                flush=True
             )
 
             response = client.models.generate_content(
@@ -40,37 +60,81 @@ def generate_with_retry(client, model, prompt):
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
-                    temperature=0.8,
-                    max_output_tokens=1000
+                    temperature=0.5,
+                    max_output_tokens=1500
                 )
             )
 
             if not response.text:
-                raise ValueError("Gemini returned an empty response")
+                print("Gemini returned an empty response.")
+                return None
 
-            return json.loads(response.text)
+            try:
+
+                result = json.loads(response.text)
+
+            except json.JSONDecodeError as error:
+
+                print(
+                    f"Invalid JSON from {model}: {error}",
+                    flush=True
+                )
+
+                print(
+                    f"Response preview: {response.text[:500]}",
+                    flush=True
+                )
+
+                return None
+
+            if not isinstance(result, dict):
+
+                print("Gemini response is not a JSON object.")
+                return None
+
+            return result
 
         except errors.APIError as error:
 
             status = getattr(error, "code", None)
 
             print(
-                f"Gemini API error: {status} - {error}"
+                f"Gemini API error: {status} - {error}",
+                flush=True
             )
+
+            # Daily quota errors cannot be fixed by short retries.
+
+            if status == 429 and is_daily_quota_error(error):
+
+                print(
+                    f"Daily quota exhausted for {model}.",
+                    flush=True
+                )
+
+                return None
 
             if status not in TEMPORARY_ERRORS:
                 raise
 
             if attempt < len(RETRY_DELAYS):
+
                 delay = RETRY_DELAYS[attempt]
 
                 print(
-                    f"Waiting {delay} seconds before retry..."
+                    f"Temporary error. "
+                    f"Retrying in {delay} seconds...",
+                    flush=True
                 )
 
                 time.sleep(delay)
+
             else:
-                print(f"{model} failed after all retries.")
+
+                print(
+                    f"{model} failed after all retries.",
+                    flush=True
+                )
 
     return None
 
@@ -82,16 +146,24 @@ def choose_destination():
     history = []
 
     if history_file.exists():
+
         try:
+
             history = json.loads(
                 history_file.read_text(encoding="utf-8")
             )
+
+            if not isinstance(history, list):
+                history = []
+
         except (json.JSONDecodeError, OSError):
+
             history = []
 
     recent_destinations = [
         item.get("destination")
         for item in history[-20:]
+        if isinstance(item, dict)
     ]
 
     prompt = f"""
@@ -115,7 +187,7 @@ Consider:
 - Potential viewer interest
 
 Avoid recently selected destinations:
-{json.dumps(recent_destinations)}
+{json.dumps(recent_destinations, ensure_ascii=False)}
 
 Choose a destination that offers enough interesting
 material for both a 60-second Short and a 4-minute
@@ -139,7 +211,7 @@ Return ONLY valid JSON with these fields:
 
     client = get_client()
 
-    print("Trying primary Gemini model...")
+    print("Trying primary Gemini model...", flush=True)
 
     result = generate_with_retry(
         client,
@@ -148,7 +220,12 @@ Return ONLY valid JSON with these fields:
     )
 
     if result is None:
-        print("Switching to fallback Gemini model...")
+
+        print(
+            "Primary model unavailable. "
+            "Switching to fallback model...",
+            flush=True
+        )
 
         result = generate_with_retry(
             client,
@@ -157,8 +234,10 @@ Return ONLY valid JSON with these fields:
         )
 
     if result is None:
+
         raise RuntimeError(
-            "Both Gemini models failed. Please try again later."
+            "Both Gemini models failed. "
+            "Check API quota and model availability."
         )
 
     required = [
@@ -171,7 +250,9 @@ Return ONLY valid JSON with these fields:
     ]
 
     for field in required:
+
         if field not in result:
+
             raise ValueError(
                 f"Gemini response missing: {field}"
             )
@@ -181,7 +262,10 @@ Return ONLY valid JSON with these fields:
         and result[field].strip()
         for field in required[:5]
     ):
-        raise ValueError("Invalid destination information")
+
+        raise ValueError(
+            "Invalid destination information"
+        )
 
     if (
         not isinstance(result["visual_ideas"], list)
@@ -191,9 +275,13 @@ Return ONLY valid JSON with these fields:
             for item in result["visual_ideas"]
         )
     ):
+
         raise ValueError("Invalid visual ideas")
 
-    print("Destination successfully selected!")
+    print(
+        "Destination successfully selected!",
+        flush=True
+    )
 
     return result
 
