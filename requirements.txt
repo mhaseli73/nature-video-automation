@@ -1,6 +1,5 @@
-
 requests
-Pillow
-moviepy
 python-dotenv
 google-genai
+edge-tts
+moviepy
