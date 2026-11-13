@@ -1,44 +1,43 @@
 import os
 import json
+import re
 import requests
 from pathlib import Path
 from urllib.parse import quote
 
-def fetch_pexels_video(query, output_dir):
-    api_key = os.getenv("PEXELS_API_KEY")
-    if not api_key:
-        raise RuntimeError("PEXELS_API_KEY is missing")
-
-    headers = {"Authorization": api_key}
-    params = {
-        "query": query,
-        "per_page": 1,
-        "orientation": "landscape",
-        "size": "medium"
+def fetch_mixkit_video(query, output_dir):
+    """Fetches a direct MP4 link from Mixkit without an API key."""
+    # Format the query for the URL (e.g., "lion in savannah" -> "lion-in-savannah")
+    search_slug = query.lower().replace(" ", "-")
+    search_url = f"https://mixkit.co/free-stock-video/{search_slug}/"
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     }
 
     try:
-        response = requests.get(
-            "https://api.pexels.com/videos/search",
-            headers=headers,
-            params=params,
-            timeout=30
-        )
+        print(f"Searching Mixkit for: {query}")
+        response = requests.get(search_url, headers=headers, timeout=30)
         response.raise_for_status()
-        data = response.json()
 
-        if not data.get("videos"):
-            print(f"No video found for query: {query}")
+        # Use regex to find direct MP4 links in the page source
+        # Pattern looks for: https://assets.mixkit.co/videos/.../...-720.mp4
+        pattern = r'https://assets\.mixkit\.co/videos/[0-9]+/[0-9]+-720\.mp4'
+        matches = re.findall(pattern, response.text)
+
+        if not matches:
+            print(f"No videos found on Mixkit for: {query}")
             return None
 
-        video_files = data["videos"][0]["video_files"]
-        video_url = video_files[0]["link"]
+        # Take the first unique link
+        video_url = sorted(set(matches))[0]
+        print(f"Found video URL: {video_url}")
 
+        # Create a safe filename and download
         safe_query = quote(query, safe="")
         local_filename = output_dir / f"clip_{safe_query}.mp4"
 
-        print(f"Downloading: {video_url}")
-        video_data = requests.get(video_url, timeout=60)
+        video_data = requests.get(video_url, headers=headers, timeout=60)
         video_data.raise_for_status()
 
         with open(local_filename, "wb") as f:
@@ -56,7 +55,6 @@ def main():
     clips_dir = output_dir / "clips"
     clips_dir.mkdir(parents=True, exist_ok=True)
 
-    # Find all scene plan files (e.g., short_scene_plan.json, long_scene_plan.json)
     scene_plan_files = list(scene_plans_dir.glob("*_scene_plan.json"))
     if not scene_plan_files:
         raise FileNotFoundError("No scene plan files found in output/scene_plans/")
@@ -69,10 +67,11 @@ def main():
             scene_plan = json.load(f)
 
         for scene in scene_plan.get("scenes", []):
-            # Use the correct key from scene_planner.py
+            # Use the correct key from your scene_planner.py
             query = scene.get("pexels_video_query")
             if query:
-                path = fetch_pexels_video(query, clips_dir)
+                # Switch from Pexels to Mixkit
+                path = fetch_mixkit_video(query, clips_dir)
                 if path:
                     all_video_paths.append(path)
 
