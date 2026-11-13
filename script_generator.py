@@ -11,7 +11,7 @@ from google.genai import types, errors
 PRIMARY_MODEL = "gemini-3.8-flash"
 FALLBACK_MODEL = "gemini-3.5-flash-lite"
 
-RETRY_DELAYS = [5, 15, 30, 60]
+RETRY_DELAYS = [10, 30, 60]
 
 TEMPORARY_ERRORS = [408, 429, 500, 502, 503, 504]
 
@@ -40,6 +40,22 @@ def get_client():
     return genai.Client(api_key=api_key)
 
 
+def is_daily_quota_error(error):
+
+    message = str(error).lower()
+
+    indicators = [
+        "per day",
+        "per_day",
+        "daily quota",
+        "requests per day",
+        "limit exceeded",
+        "free tier"
+    ]
+
+    return any(item in message for item in indicators)
+
+
 def is_retryable_error(error):
 
     current = error
@@ -52,6 +68,9 @@ def is_retryable_error(error):
         if isinstance(current, errors.APIError):
 
             status = getattr(current, "code", None)
+
+            if status == 429 and is_daily_quota_error(current):
+                return False
 
             if status in TEMPORARY_ERRORS:
                 return True
@@ -85,7 +104,8 @@ def generate_with_retry(client, model, prompt):
             print(
                 f"Trying {model} "
                 f"(attempt {attempt + 1}/"
-                f"{len(RETRY_DELAYS) + 1})..."
+                f"{len(RETRY_DELAYS) + 1})...",
+                flush=True
             )
 
             response = client.models.generate_content(
@@ -104,6 +124,7 @@ def generate_with_retry(client, model, prompt):
             result = json.loads(response.text)
 
             if not isinstance(result, dict):
+
                 raise ValueError(
                     "Gemini response must be a JSON object"
                 )
@@ -114,10 +135,26 @@ def generate_with_retry(client, model, prompt):
 
             print(
                 f"Error with {model}: "
-                f"{type(error).__name__}: {error}"
+                f"{type(error).__name__}: {error}",
+                flush=True
             )
 
             if not is_retryable_error(error):
+
+                if (
+                    isinstance(error, errors.APIError)
+                    and getattr(error, "code", None) == 429
+                    and is_daily_quota_error(error)
+                ):
+
+                    print(
+                        "Daily API quota exhausted. "
+                        "Skipping further retries.",
+                        flush=True
+                    )
+
+                    return None
+
                 raise
 
             if attempt < len(RETRY_DELAYS):
@@ -126,7 +163,8 @@ def generate_with_retry(client, model, prompt):
 
                 print(
                     f"Temporary error detected. "
-                    f"Retrying in {delay} seconds..."
+                    f"Retrying in {delay} seconds...",
+                    flush=True
                 )
 
                 time.sleep(delay)
@@ -134,10 +172,53 @@ def generate_with_retry(client, model, prompt):
             else:
 
                 print(
-                    f"{model} failed after all retries."
+                    f"{model} failed after all retries.",
+                    flush=True
                 )
 
     return None
+
+
+def validate_script(result):
+
+    if not isinstance(result, dict):
+        return False
+
+    required = [
+        "title",
+        "hook",
+        "narration",
+        "visual_suggestions",
+        "description",
+        "tags"
+    ]
+
+    for field in required:
+
+        if field not in result:
+            return False
+
+    text_fields = [
+        "title",
+        "hook",
+        "narration",
+        "description"
+    ]
+
+    if not all(
+        isinstance(result[field], str)
+        and result[field].strip()
+        for field in text_fields
+    ):
+        return False
+
+    if not isinstance(result["visual_suggestions"], list):
+        return False
+
+    if not isinstance(result["tags"], list):
+        return False
+
+    return True
 
 
 def generate_script(plan, research, client):
@@ -149,10 +230,16 @@ def generate_script(plan, research, client):
         target_words = "120 to 140 words"
         duration = "60 seconds"
 
-    else:
+    elif video_type == "long":
 
         target_words = "480 to 520 words"
         duration = "4 minutes"
+
+    else:
+
+        raise ValueError(
+            f"Unknown video type: {video_type}"
+        )
 
     prompt = f"""
 You are a professional international travel
@@ -182,7 +269,7 @@ RESEARCH SOURCE:
 {research.get('source', '')}
 
 VISUAL IDEAS:
-{json.dumps(plan.get('visual_ideas', []))}
+{json.dumps(plan.get('visual_ideas', []), ensure_ascii=False)}
 
 VIDEO FORMAT:
 {video_type}
@@ -235,7 +322,7 @@ Return ONLY valid JSON:
 }}
 """
 
-    print(f"Generating {video_type} script...")
+    print(f"Generating {video_type} script...", flush=True)
 
     result = generate_with_retry(
         client,
@@ -246,8 +333,9 @@ Return ONLY valid JSON:
     if result is None:
 
         print(
-            "Primary model exhausted. "
-            "Switching to fallback model..."
+            "Primary model unavailable. "
+            "Switching to fallback model...",
+            flush=True
         )
 
         result = generate_with_retry(
@@ -262,49 +350,19 @@ Return ONLY valid JSON:
             f"Both Gemini models failed for {video_type} script."
         )
 
-    required = [
-        "title",
-        "hook",
-        "narration",
-        "visual_suggestions",
-        "description",
-        "tags"
-    ]
+    if not validate_script(result):
 
-    for field in required:
+        raise ValueError(
+            f"Invalid script structure for {video_type}"
+        )
 
-        if field not in result:
-
-            raise ValueError(
-                f"Missing script field: {field}"
-            )
-
-    text_fields = [
-        "title",
-        "hook",
-        "narration",
-        "description"
-    ]
-
-    if not all(
-        isinstance(result[field], str)
-        and result[field].strip()
-        for field in text_fields
-    ):
-
-        raise ValueError("Invalid script text fields")
-
-    if not isinstance(result["visual_suggestions"], list):
-
-        raise ValueError("Invalid visual suggestions")
-
-    if not isinstance(result["tags"], list):
-
-        raise ValueError("Invalid tags")
+    result["destination"] = plan["destination"]
+    result["country"] = plan["country"]
 
     print(
         f"{video_type.capitalize()} "
-        f"script generated successfully!"
+        "script generated successfully!",
+        flush=True
     )
 
     return result
@@ -341,17 +399,52 @@ def main():
 
         video_type = plan["video_type"]
 
-        print(f"\nGenerating: {video_type}")
+        print(f"\nGenerating: {video_type}", flush=True)
+
+        filename = f"{video_type}_script.json"
+
+        json_path = script_folder / filename
+
+        # Reuse a valid script only for the same destination.
+
+        if json_path.exists():
+
+            try:
+
+                existing = json.loads(
+                    json_path.read_text(encoding="utf-8")
+                )
+
+                if (
+                    validate_script(existing)
+                    and existing.get("destination")
+                    == plan["destination"]
+                    and existing.get("country")
+                    == plan["country"]
+                ):
+
+                    print(
+                        f"Valid existing script found "
+                        f"for {plan['destination']}. "
+                        "Skipping regeneration.",
+                        flush=True
+                    )
+
+                    continue
+
+            except (json.JSONDecodeError, OSError):
+
+                print(
+                    "Existing script is invalid. "
+                    "Generating a new one.",
+                    flush=True
+                )
 
         result = generate_script(
             plan,
             research,
             client
         )
-
-        filename = f"{video_type}_script.json"
-
-        json_path = script_folder / filename
 
         with open(
             json_path,
@@ -377,10 +470,11 @@ def main():
             encoding="utf-8"
         )
 
-        print(f"Created: {filename}")
+        print(f"Created: {filename}", flush=True)
 
     print(
-        "\nGemini script generation completed!"
+        "\nGemini script generation completed!",
+        flush=True
     )
 
 
