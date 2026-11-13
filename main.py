@@ -9,27 +9,10 @@ def main():
     output = Path("output")
     output.mkdir(exist_ok=True)
 
-    history_file = output / "decision_history.json"
-    history = []
-
-    # 1. Load history BEFORE asking Gemini
-    if history_file.exists():
-        try:
-            history = json.loads(history_file.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            history = []
-
-    # Extract past topics to avoid repetition (limit to last 20 to keep the prompt fast)
-    past_topics = [
-        f"{h.get('destination', 'Unknown')} - {h.get('topic_angle', 'Unknown')}"
-        for h in history[-20:]
-    ]
-
     print("Gemini AI is selecting today's destination...")
-    print(f"Telling AI to avoid {len(past_topics)} previous topics.")
 
-    # 2. Pass past_topics to the AI
-    destination = choose_destination(past_topics)
+    # Call the brain (it reads the history file itself automatically)
+    destination = choose_destination()
 
     print("Selected:", destination["name"], destination["country"])
 
@@ -74,7 +57,16 @@ def main():
             ensure_ascii=False
         )
 
-    # 3. Save the new decision to history
+    # Save the new decision to history so the AI avoids it next time
+    history_file = output / "decision_history.json"
+    history = []
+
+    if history_file.exists():
+        try:
+            history = json.loads(history_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            history = []
+
     history.append({
         "destination": destination["name"],
         "country": destination["country"],
