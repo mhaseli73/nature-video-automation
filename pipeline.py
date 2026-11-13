@@ -1,15 +1,15 @@
 import time
 import traceback
 
-# Import all your pipeline modules
+# Import all pipeline modules
 import main
 import researcher
 import script_generator
 import scene_planner
 import visual_fetcher
+import voiceover_generator
 
 def run_step(name, function):
-    """Helper function to run a pipeline step with timing and error handling."""
     print(f"\n{'=' * 50}", flush=True)
     print(f"STARTING: {name}", flush=True)
     start_time = time.time()
@@ -24,7 +24,6 @@ def run_step(name, function):
         raise
 
 def run_pipeline():
-    """Runs the full end-to-end video generation pipeline."""
     print("Starting Travel Video AI Pipeline...", flush=True)
     
     # Step 1: Pick a destination
@@ -36,14 +35,16 @@ def run_pipeline():
     # Step 3: Generate the video script
     run_step("Video Script Generation", script_generator.main)
     
-    # Step 4: Plan the scenes (creates scene_plans/*.json)
+    # Step 4: Plan the scenes
     run_step("Scene Planning", scene_planner.main)
     
-    # Step 5: Fetch video clips from Pexels (creates clips/ and video_assets.json)
+    # Step 5: Fetch video clips from Pexels
     run_step("Visual Acquisition", visual_fetcher.main)
     
-    # Future Steps (Uncomment when you build them):
-    # run_step("Voiceover Generation", voiceover_generator.main)
+    # Step 6: Generate the voiceover audio
+    run_step("Voiceover Generation", voiceover_generator.main)
+    
+    # Future Step (Uncomment when you build it):
     # run_step("Video Rendering", video_renderer.main)
     
     print("\nPipeline completed successfully!", flush=True)
